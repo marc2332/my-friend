@@ -1,13 +1,14 @@
 use reqwest::Url;
 use serde::Deserialize;
+use std::fmt::Write;
 use std::{collections::HashMap, error::Error, str::FromStr};
 use teloxide::{prelude::*, types::InputFile, utils::command::BotCommands};
 use tracing::{error, info, Level};
 use tracing_subscriber::FmtSubscriber;
 
 #[derive(Deserialize)]
-struct DogInfo {
-    message: String,
+struct DogResponse<T> {
+    message: T,
     status: String,
 }
 
@@ -16,17 +17,31 @@ struct GoingeckoCoinValue {
     usd: f32,
 }
 
-async fn get_random_dog() -> Result<DogInfo, reqwest::Error> {
+async fn get_random_dog() -> Result<DogResponse<String>, reqwest::Error> {
     reqwest::get("https://dog.ceo/api/breeds/image/random")
         .await?
-        .json::<DogInfo>()
+        .json::<DogResponse<String>>()
         .await
 }
 
-async fn get_random_dog_from_breed(breed: &str) -> Result<DogInfo, reqwest::Error> {
+type BreedsList = HashMap<String, Vec<String>>;
+async fn get_list_of_breeds() -> Result<DogResponse<BreedsList>, reqwest::Error> {
+    reqwest::get("https://dog.ceo/api/breeds/list/all")
+        .await?
+        .json::<DogResponse<BreedsList>>()
+        .await
+}
+
+async fn get_random_dog_from_breed(breed: &str) -> Result<DogResponse<String>, reqwest::Error> {
+    let breed = breed.to_lowercase();
+    let breed = breed
+        .split_whitespace()
+        .rev()
+        .collect::<Vec<&str>>()
+        .join("/");
     reqwest::get(format!("https://dog.ceo/api/breed/{}/images/random", breed))
         .await?
-        .json::<DogInfo>()
+        .json::<DogResponse<String>>()
         .await
 }
 
@@ -56,6 +71,9 @@ enum Command {
     #[command(description = "Random dog from the specified breed")]
     Breed(String),
 
+    #[command(description = "List the breeds of dogs")]
+    Breeds,
+
     #[command(description = "Get the value of EURO in USD")]
     Euro,
 }
@@ -81,6 +99,35 @@ async fn answer(
     command: Command,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     match command {
+        Command::Breeds => {
+            info!("Fetching a the list of dogs...");
+
+            let breeds = get_list_of_breeds().await;
+
+            if let Ok(breeds) = breeds {
+                if breeds.status == "success" {
+                    let mut msg = String::new();
+
+                    for (key, value) in breeds.message.iter() {
+                        writeln!(msg, "-│ {}", key).unwrap();
+                        for variant in value {
+                            writeln!(msg, "     |> {}", variant).unwrap();
+                        }
+                    }
+
+                    let res = bot.send_message(message.from().unwrap().id, msg).await;
+                    if let Err(e) = res {
+                        error!("Error while sending message {:?} ", e);
+                    } else {
+                        info!("Dog sent with success");
+                    }
+                } else {
+                    error!("Could not get the list of breeds");
+                }
+            } else {
+                error!("Could not get the list of breeds");
+            }
+        }
         Command::Doggo => {
             info!("Fetching a random dog...");
 
@@ -106,7 +153,9 @@ async fn answer(
             let euro = get_euro_usd().await;
 
             if let Ok(Some(euro)) = euro {
-                let res = bot.send_message(message.chat.id, format!("${}", euro)).await;
+                let res = bot
+                    .send_message(message.chat.id, format!("${}", euro))
+                    .await;
                 if let Err(e) = res {
                     error!("Error while sending message {:?} ", e);
                 } else {
@@ -117,7 +166,7 @@ async fn answer(
             }
         }
         Command::Breed(breed) => {
-            info!("Fetching a random dog...");
+            info!("Fetching a random dog of breed {}...", breed);
 
             let dog = get_random_dog_from_breed(&breed).await;
 
