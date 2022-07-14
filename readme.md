@@ -1,6 +1,8 @@
 Marc's friend
 --- 
 
+A Telegram Bot.
+
 ### 📝 Commands
 | Command | Description |
 |---------|-------------|
