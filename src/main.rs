@@ -181,6 +181,9 @@ async fn answer(
                     }
                 } else {
                     error!("Could not find a dog");
+                    bot.send_message(message.chat.id, format!("Breed '{}' doesn't exist", breed))
+                        .await
+                        .ok();
                 }
             } else {
                 error!("Could not find a dog");
